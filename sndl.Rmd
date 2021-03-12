@@ -1,0 +1,112 @@
+---
+# title: "SNDL Data"
+# author: "Braden Schrock"
+# date: "2/3/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE, echo=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(pdftools)
+library(readr)
+library(tidyverse)
+library(collapsibleTree)
+library(DT)
+```
+
+```{r wrangle the data, include=FALSE, echo=FALSE}
+
+# get the pdf
+raw_text <- pdf_text("sndl.pdf")
+
+# split the text every time we encounter "\r\n" before a digit
+split_text <- lapply(X = raw_text, FUN = strsplit, split = "\r\n(?=\\d)", perl = TRUE)
+
+# remove the top level of the list
+flat_split_text <- flatten(split_text)
+
+# remove the second level of the list
+flatter_split_text <- flatten(flat_split_text)
+
+# reformat into a dataframe with a single column
+df_text <- do.call(rbind, flatter_split_text) %>%
+  data.frame() %>%
+  
+# now start cleaning the dataframe!
+  filter(!grepl("ECHELON",.)) %>%
+  rename(y = ".") %>%
+  separate(col = y, into = c("echelon", "command"), sep ="\\s(?=[A-Z])", extra = "merge") %>%
+  separate(col = command, into = c("command", "UIC"), 
+           sep ="\\s(?=\\(\\d\\d\\d\\d.\\))|\\s(?=\\(TBD\\))|\\s(?=\\(\\d\\d\\d\\d.)", extra = "merge") %>%
+  mutate(echelon = str_trunc(echelon, width = 1, side="right", ellipsis = "")) %>%
+  mutate(UIC = str_trunc(UIC, width = 7, side = "right", ellipsis = "")) %>%
+  mutate(UIC = gsub("\\(|\\)","", UIC)) %>%
+  mutate(command = str_squish(command)) %>%
+  mutate(echelon = as.numeric(echelon)) 
+
+# create the `parent` column with a intermediate `foo` column (avoiding any for/while loops)
+df_hierarchy <- df_text %>%
+  mutate(parent = ifelse(echelon == 2, command[1], NA_real_)) %>%
+  mutate(foo = ifelse(is.na(parent) == FALSE, command, NA_real_)) %>%
+  fill(foo) %>%
+  mutate(parent = ifelse(echelon == 3, foo, parent)) %>%
+  mutate(foo = ifelse(is.na(parent) == FALSE, command, NA_real_)) %>%
+  fill(foo) %>%
+  mutate(parent = ifelse(echelon == 4, foo, parent)) %>%
+  mutate(foo = ifelse(is.na(parent) == FALSE, command, NA_real_)) %>%
+  fill(foo) %>%
+  mutate(parent = ifelse(echelon == 5, foo, parent)) %>%
+  mutate(foo = ifelse(is.na(parent) == FALSE, command, NA_real_)) %>%
+  fill(foo) %>%
+  mutate(parent = ifelse(echelon == 6, foo, parent)) %>%
+  mutate(foo = ifelse(is.na(parent) == FALSE, command, NA_real_)) %>%
+  fill(foo) %>%
+  mutate(parent = ifelse(echelon == 7, foo, parent)) %>%
+  mutate(foo = ifelse(is.na(parent) == FALSE, command, NA_real_)) %>%
+  select(-foo) %>%
+  relocate(parent, command, UIC, echelon)
+
+
+```
+
+## STANDARD NAVY DISTRIBUTION LIST
+
+ADMINISTRATIVE ORGANIZATION OF THE OPERATING FORCES OF THE U.S. NAVY
+
+```{r visualization, echo=FALSE}
+# small chunk of the dataset for testing
+# test_df <- head(df_hierarchy, 50)
+# collapsibleTreeNetwork(test_df, collapsed = TRUE, attribute = "echelon", tooltip = TRUE)
+
+# create the visualization
+collapsibleTreeNetwork(df_hierarchy, collapsed = TRUE, attribute = "echelon", tooltip = FALSE, width = 3000, height = 600)
+```
+
+The visualization above is interactive. You can click on nodes to expand them. You can also zoom and pan. The dataset used to create the visualization is shown in the table below (parsed from a PDF document - no guarantees as to any level of accuracy).
+
+```{r write out dataset, echo=FALSE}
+write.csv(df_hierarchy, "navy_hierarchy.csv", row.names = FALSE)
+
+datatable(df_hierarchy)
+```
+
+```{r bring in Army dataset}
+# library(readxl)
+# 
+# army_raw <- read_excel("armydata.xlsx")
+# 
+# unit_uic <- army_raw %>%
+#   select("UIC", "TITLE")
+# 
+# army_parents <- army_raw %>%
+#   select("PARENTUIC") %>%
+#   left_join(unit_uic, by = c("PARENTUIC"= "UIC"))
+#   
+# 
+# 
+# 
+# army_hierarchy <- army_raw %>%
+#   left_join(army_parents, by = "UIC") %>%
+#   select("UIC", "TITLE", "parent")
+
+```
